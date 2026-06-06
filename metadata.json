@@ -1,0 +1,6 @@
+{
+  "name": "Car Rental",
+  "description": "An elegant, comprehensive car rental and accounting application featuring fleet management, customer booking, double-entry financial ledger accounting, detailed general ledger statements, customer tailoring size profiles, and analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
