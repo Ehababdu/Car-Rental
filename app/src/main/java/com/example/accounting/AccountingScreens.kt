@@ -130,32 +130,131 @@ fun ChartOfAccountsView(viewModel: AccountingViewModel) {
     val accountsList by viewModel.accounts.collectAsState(initial = emptyList())
     var showAddAccountDialog by remember { mutableStateOf(false) }
 
+    // Tree hierarchy collapse/expand state structure
+    val expandedStates = remember { mutableStateMapOf<Int, Boolean>() }
+    val accountsMap = remember(accountsList) { accountsList.associateBy { it.id } }
+
+    // Breadth-First search helper to recursively expand/collapse a group and all its sub-groups
+    val toggleExpandedRecursive = remember(accountsList) {
+        { parentId: Int, isExpandedNow: Boolean ->
+            val nextState = !isExpandedNow
+            val stack = mutableListOf(parentId)
+            while (stack.isNotEmpty()) {
+                val currentId = stack.removeAt(0)
+                expandedStates[currentId] = nextState
+                val directChildren = accountsList.filter { it.parentId == currentId && it.isGroup }
+                stack.addAll(directChildren.map { it.id })
+            }
+        }
+    }
+
+    val visibleAccounts = remember(accountsList, expandedStates, accountsMap) {
+        accountsList.filter { account ->
+            var currentParentId = account.parentId
+            var visible = true
+            while (currentParentId != null) {
+                val parent = accountsMap[currentParentId] ?: break
+                val isParentExpanded = expandedStates[parent.id] ?: true
+                if (!isParentExpanded) {
+                    visible = false
+                    break
+                }
+                currentParentId = parent.parentId
+            }
+            visible
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (accountsList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccountingPrimary)
             }
         } else {
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(16.dp)
             ) {
-                item {
-                    Text(
-                        text = "دليل وشجرة الحسابات المالية اللامركزية",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccountingPrimary,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                Text(
+                    text = "دليل وشجرة الحسابات المالية اللامركزية",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccountingPrimary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // Expand / Collapse All Control Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .background(Color(0xFFF1EEF4), RoundedCornerShape(12.dp))
+                        .padding(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            accountsList.filter { it.isGroup }.forEach { expandedStates[it.id] = true }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccountingPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("توسيع الكل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            accountsList.filter { it.isGroup }.forEach { expandedStates[it.id] = false }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = AccountingPrimary
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .border(1.dp, AccountingPrimary, RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("طي الكل (إغلاق)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-                items(accountsList) { account ->
-                    AccountGridItem(account)
-                }
-                item {
-                    Spacer(modifier = Modifier.height(80.dp))
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(visibleAccounts, key = { it.id }) { account ->
+                        val isExpanded = expandedStates[account.id] ?: true
+                        AccountGridItem(
+                            account = account,
+                            isExpanded = isExpanded,
+                            onToggleExpand = {
+                                if (account.isGroup) {
+                                    toggleExpandedRecursive(account.id, isExpanded)
+                                }
+                            }
+                        )
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(80.dp))
+                    }
                 }
             }
         }
@@ -186,7 +285,11 @@ fun ChartOfAccountsView(viewModel: AccountingViewModel) {
 }
 
 @Composable
-fun AccountGridItem(account: Account) {
+fun AccountGridItem(
+    account: Account,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit
+) {
     val indent = if (account.parentId != null) (account.code.length - 1) * 12 else 0
     val cardBg = if (account.isGroup) Color(0xFFF3E8FF) else Color(0xFFFCFAFD)
     val textColor = if (account.isGroup) AccountingPrimary else Color(0xFF333333)
@@ -199,7 +302,14 @@ fun AccountGridItem(account: Account) {
                 1.dp,
                 if (account.isGroup) Color(0xFFE1BEE7) else Color(0xFFECE9ED),
                 RoundedCornerShape(8.dp)
-            ),
+            )
+            .let { modifier ->
+                if (account.isGroup) {
+                    modifier.clickable { onToggleExpand() }
+                } else {
+                    modifier
+                }
+            },
         colors = CardDefaults.cardColors(containerColor = cardBg),
         shape = RoundedCornerShape(8.dp)
     ) {
@@ -211,6 +321,15 @@ fun AccountGridItem(account: Account) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (account.isGroup) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowLeft,
+                        contentDescription = if (isExpanded) "إغلاق" else "فتح",
+                        tint = AccountingPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
                 Icon(
                     imageVector = if (account.isGroup) Icons.Filled.Folder else Icons.Filled.Description,
                     contentDescription = null,
@@ -240,12 +359,23 @@ fun AccountGridItem(account: Account) {
                     color = getBalanceColor(account.balance, account.type)
                 )
             } else {
-                Text(
-                    text = "مجموعة فرعية",
-                    fontSize = 11.sp,
-                    color = AccountingPrimary,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = if (isExpanded) "مفتوح" else "مغلق",
+                        fontSize = 10.sp,
+                        color = if (isExpanded) ProfitGreen else Color.Gray,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "• مجموعة",
+                        fontSize = 11.sp,
+                        color = AccountingPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }
